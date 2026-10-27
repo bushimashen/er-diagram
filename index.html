@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>数据库 ER 图设计器 · 画完直接出 SQL</title>
+<meta name="description" content="拖拽建表、端口连线画关系，实时生成 MySQL / PostgreSQL / SQLite 建表语句与外键；也能把已有 CREATE TABLE 粘回来反向出图。自动存本地，可导出 PNG / JSON。" />
+<meta property="og:title" content="数据库 ER 图设计器" />
+<meta property="og:description" content="画 ER 图同时生成三种方言的建表 SQL，也支持反向导入。" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2322c55e' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cellipse cx='12' cy='6' rx='7' ry='3'/%3E%3Cpath d='M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6'/%3E%3Cpath d='M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3'/%3E%3C/svg%3E" />
+<style>
+[hidden] { display: none !important; }
+
+:root {
+  --bg: #eef1f7; --surface: #fff; --surface2: #f4f6fb; --surface3: #e6ebf4;
+  --text: #16203a; --muted: #667089; --border: #dbe1ee;
+  --primary: #2563eb; --ok: #16a34a; --warn: #d97706; --danger: #e11d48;
+  --shadow: 0 6px 22px rgba(23, 32, 64, .1);
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0e14; --surface: #141a24; --surface2: #1a2130; --surface3: #232c3d;
+    --text: #e6ecf6; --muted: #8b94a8; --border: #26303f;
+    --shadow: 0 8px 26px rgba(0, 0, 0, .5);
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg); color: var(--text); overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13.5px; -webkit-font-smoothing: antialiased;
+}
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ---------- 顶栏 ---------- */
+.bar {
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+  background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.bar h1 { margin: 0; font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+.bar .sub { color: var(--muted); font-size: 12px; }
+.spacer { flex: 1; }
+.grp { display: flex; align-items: center; gap: 6px; }
+.sep { width: 1px; height: 20px; background: var(--border); }
+
+.btn {
+  border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+  border-radius: 8px; padding: 6px 12px; font-size: 12.5px; font-weight: 600;
+  cursor: pointer; font-family: inherit; white-space: nowrap;
+}
+.btn:hover { background: var(--surface3); }
+.btn.primary { background: linear-gradient(135deg, var(--primary), #7c3aed); border: none; color: #fff; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.danger { color: var(--danger); }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn.sq { padding: 6px 9px; }
+select, input[type="text"], input[type="number"] {
+  background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 9px; font-size: 12.5px; font-family: inherit; outline: none;
+}
+select:focus, input:focus { border-color: var(--primary); }
+
+/* ---------- 主体 ---------- */
+.main { flex: 1; display: flex; min-height: 0; }
+.canvas-wrap { flex: 1; position: relative; overflow: hidden; background: var(--bg); }
+canvas { display: block; width: 100%; height: 100%; cursor: default; }
+canvas.grabbing { cursor: grabbing; }
+canvas.movable { cursor: move; }
+canvas.cross { cursor: crosshair; }
+
+.hint {
+  position: absolute; left: 14px; bottom: 12px; color: var(--muted); font-size: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; pointer-events: none;
+}
+.zoomtag {
+  position: absolute; right: 14px; bottom: 12px; color: var(--muted); font-size: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px;
+}
+
+/* ---------- 右侧检查器 ---------- */
+.side {
+  width: 330px; flex: none; background: var(--surface); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0;
+}
+.side-head {
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+  font-size: 12.5px; font-weight: 700; color: var(--muted);
+  display: flex; align-items: center; gap: 8px;
+}
+.side-body { flex: 1; overflow: auto; padding: 12px 14px 20px; }
+.empty { color: var(--muted); font-size: 12.5px; line-height: 1.8; }
+.empty b { color: var(--text); }
+
+.row { display: flex; gap: 8px; align-items: center; margin-bottom: 9px; }
+.row > label { width: 56px; flex: none; color: var(--muted); font-size: 12px; }
+.row input[type="text"], .row select { flex: 1; min-width: 0; }
+
+.colors { display: flex; gap: 6px; flex-wrap: wrap; }
+.swatch {
+  width: 22px; height: 22px; border-radius: 6px; cursor: pointer; border: 2px solid transparent;
+}
+.swatch.on { border-color: var(--text); }
+
+.fields { margin-top: 14px; }
+.fields-title {
+  display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 700;
+  color: var(--muted); margin-bottom: 8px;
+}
+.fitem {
+  border: 1px solid var(--border); border-radius: 9px; padding: 8px 9px;
+  margin-bottom: 7px; background: var(--surface2);
+}
+.fitem .l1 { display: flex; gap: 6px; }
+.fitem .l1 input[type="text"] { flex: 1; min-width: 0; }
+.fitem .l1 input.type { width: 96px; flex: none; font-family: var(--mono); font-size: 11.5px; }
+.flags { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.flag {
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  border-radius: 6px; padding: 2px 7px; font-size: 11px; font-weight: 700; cursor: pointer;
+  font-family: var(--mono);
+}
+.flag.on { background: color-mix(in srgb, var(--primary) 16%, transparent); color: var(--primary); border-color: transparent; }
+.flag.fk.on { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.flag .x { opacity: .6; margin-left: 4px; }
+
+/* ---------- SQL 抽屉 ---------- */
+.sql-drawer {
+  position: absolute; left: 0; right: 330px; bottom: 0; height: 44%;
+  background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; flex-direction: column; z-index: 20;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, .12);
+}
+.sql-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--muted); font-weight: 600;
+}
+.sql-body { flex: 1; display: flex; min-height: 0; }
+.sql-body textarea {
+  flex: 1; border: none; outline: none; resize: none; padding: 12px 14px;
+  background: var(--surface); color: var(--text);
+  font-family: var(--mono); font-size: 12px; line-height: 1.65;
+}
+.sql-tabs { display: flex; gap: 4px; }
+.tab {
+  border: 1px solid var(--border); background: var(--surface2); color: var(--muted);
+  border-radius: 7px; padding: 3px 10px; font-size: 12px; cursor: pointer; font-family: inherit;
+}
+.tab.on { background: var(--primary); border-color: transparent; color: #fff; font-weight: 700; }
+.err { color: var(--danger); font-size: 12px; padding: 0 12px 8px; white-space: pre-wrap; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+  background: #16203a; color: #fff; padding: 9px 18px; border-radius: 999px;
+  font-size: 13px; z-index: 90; box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="bar">
+    <h1>数据库 ER 图设计器</h1>
+    <span class="sub" id="stat">—</span>
+    <div class="spacer"></div>
+
+    <div class="grp">
+      <button class="btn primary" id="addTable">+ 新建表</button>
+      <select id="tpl">
+        <option value="">载入模板…</option>
+        <option value="blog">博客</option>
+        <option value="shop">电商订单</option>
+        <option value="rbac">RBAC 权限</option>
+      </select>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <button class="btn sq" id="undo" title="撤销 (Ctrl+Z)">↶</button>
+      <button class="btn sq" id="redo" title="重做 (Ctrl+Shift+Z)">↷</button>
+      <button class="btn sq" id="fit" title="适应画布">⤢</button>
+      <button class="btn sq" id="auto" title="自动排列">⇉</button>
+    </div>
+    <div class="sep"></div>
+    <div class="grp">
+      <button class="btn" id="sqlBtn">SQL</button>
+      <button class="btn" id="pngBtn">导出 PNG</button>
+      <button class="btn" id="jsonBtn">导出 JSON</button>
+      <button class="btn" id="impBtn">导入</button>
+      <button class="btn danger" id="clearBtn">清空</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="canvas-wrap" id="wrap">
+      <canvas id="cv"></canvas>
+      <div class="hint">拖表头移动 · 从行端口拖到另一张表的行建立关系 · 滚轮缩放 · 空白拖动平移</div>
+      <div class="zoomtag" id="zoomtag">100%</div>
+
+      <div class="sql-drawer" id="sqlDrawer" hidden>
+        <div class="sql-head">
+          <span>生成的建表语句</span>
+          <div class="sql-tabs" id="dialects">
+            <button class="tab on" data-d="mysql">MySQL</button>
+            <button class="tab" data-d="postgresql">PostgreSQL</button>
+            <button class="tab" data-d="sqlite">SQLite</button>
+          </div>
+          <div class="spacer" style="flex:1"></div>
+          <button class="btn sq" id="copySql">复制</button>
+          <button class="btn sq" id="dlSql">下载 .sql</button>
+          <button class="btn sq" id="sqlClose">收起</button>
+        </div>
+        <div class="sql-body"><textarea id="sqlOut" spellcheck="false" readonly></textarea></div>
+        <div class="err" id="sqlErr" hidden></div>
+      </div>
+    </div>
+
+    <aside class="side">
+      <div class="side-head" id="sideHead">检查器</div>
+      <div class="side-body" id="sideBody">
+        <div class="empty">
+          <b>开始：</b><br />
+          · 点「+ 新建表」或选一个模板<br />
+          · 拖表头移动位置，从行右侧端口拖到另一张表的行即可连线<br />
+          · 空白处拖动平移，滚轮缩放<br />
+          · 画完点「SQL」直接得到建表语句
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<input type="file" id="fileJson" accept="application/json,.json" hidden />
+<input type="file" id="fileSql" accept=".sql,text/plain" hidden />
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/* ================= 常量 ================= */
+const TABLE_W = 232
+const HEADER_H = 42
+const ROW_H = 30
+const SNAP = 16
+const GRID = 16
+const COLORS = ['#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6', '#14b8a6', '#ec4899', '#64748b']
+const TYPES = ['INT', 'BIGINT', 'SMALLINT', 'TINYINT', 'VARCHAR(255)', 'CHAR(36)', 'TEXT', 'LONGTEXT',
+  'DECIMAL(10,2)', 'FLOAT', 'DOUBLE', 'BOOLEAN', 'DATE', 'DATETIME', 'TIMESTAMP', 'TIME', 'JSON', 'BLOB', 'UUID']
+const FK_ACTIONS = ['NO ACTION', 'RESTRICT', 'CASCADE', 'SET NULL', 'SET DEFAULT']
+const SAVE_KEY = 'er-diagram-standalone-v1'
+
+/* ================= 状态 ================= */
+let tables = []
+let rels = []
+let dialect = 'mysql'
+let view = { zoom: 1, x: 40, y: 40 }
+let selTableId = null
+let selRelId = null
+let uid = 1
+let history = []
+let histIdx = -1
+let saveTimer = 0
+let rafId = 0
+
+const cv = document.getElementById('cv')
+let ctx = cv.getContext('2d')
+const wrap = document.getElementById('wrap')
+const $ = (id) => document.getElementById(id)
+
+const newId = (p) => p + '_' + (uid++) + Date.now().toString(36).slice(-3)
+
+/* ================= 数据构造 ================= */
+function makeField(o) {
+  return Object.assign({
+    id: newId('f'), name: 'field', type: 'INT',
+    pk: false, fk: false, notnull: false, unique: false, def: '', comment: ''
+  }, o || {})
+}
+function makeTable(x, y, o) {
+  return Object.assign({
+    id: newId('t'), name: 'new_table', comment: '', color: COLORS[tables.length % COLORS.length],
+    x: x, y: y, fields: [makeField({ name: 'id', type: 'INT', pk: true, notnull: true })]
+  }, o || {})
+}
+const tableById = (id) => tables.find((t) => t.id === id) || null
+
+/* ================= 历史 ================= */
+function snapshot() {
+  return JSON.stringify({ tables, rels })
+}
+function pushHistory() {
+  const s = snapshot()
+  if (history[histIdx] === s) return
+  history = history.slice(0, histIdx + 1)
+  history.push(s)
+  if (history.length > 60) history.shift()
+  histIdx = history.length - 1
+  syncUndo()
+}
+function restore(s) {
+  const d = JSON.parse(s)
+  tables = d.tables
+  rels = d.rels
+  render(); renderSide(); scheduleSave()
+}
+function undo() { if (histIdx > 0) { histIdx--; restore(history[histIdx]); syncUndo() } }
+function redo() { if (histIdx < history.length - 1) { histIdx++; restore(history[histIdx]); syncUndo() } }
+function syncUndo() {
+  $('undo').disabled = histIdx <= 0
+  $('redo').disabled = histIdx >= history.length - 1
+}
+
+/* ================= 本地保存 ================= */
+function scheduleSave() {
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveNow, 400)
+}
+function saveNow() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ tables, rels, dialect, view }))
+  } catch (e) { /* 隐私模式可能禁用 localStorage */ }
+}
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    if (!raw) return false
+    const d = JSON.parse(raw)
+    if (!Array.isArray(d.tables) || !d.tables.length) return false
+    tables = d.tables
+    rels = Array.isArray(d.rels) ? d.rels : []
+    dialect = d.dialect || 'mysql'
+    if (d.view) view = d.view
+    return true
+  } catch (e) { return false }
+}
+
+/* ================= 渲染 ================= */
+function render() {
+  if (rafId) return
+  rafId = requestAnimationFrame(() => { rafId = 0; paint() })
+}
+
+function paint() {
+  const dpr = window.devicePixelRatio || 1
+  const w = wrap.clientWidth
+  const h = wrap.clientHeight
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr)
+    cv.height = Math.round(h * dpr)
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+
+  // 背景点阵
+  ctx.save()
+  ctx.fillStyle = getVar('--muted')
+  ctx.globalAlpha = 0.18
+  const step = GRID * view.zoom
+  if (step >= 8) {
+    const ox = view.x % step
+    const oy = view.y % step
+    for (let x = ox; x < w; x += step) {
+      for (let y = oy; y < h; y += step) ctx.fillRect(x, y, 1, 1)
+    }
+  }
+  ctx.restore()
+
+  ctx.save()
+  ctx.translate(view.x, view.y)
+  ctx.scale(view.zoom, view.zoom)
+
+  for (const r of rels) drawRel(r)
+  for (const t of tables) drawTable(t)
+
+  ctx.restore()
+
+  $('zoomtag').textContent = Math.round(view.zoom * 100) + '%'
+  $('stat').textContent = `${tables.length} 张表 · ${tables.reduce((n, t) => n + t.fields.length, 0)} 个字段 · ${rels.length} 条关系`
+}
+
+function getVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888'
+}
+
+function rr(x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+  ctx.lineTo(x + r, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+  ctx.lineTo(x, y + r)
+  ctx.quadraticCurveTo(x, y, x + r, y)
+  ctx.closePath()
+}
+
+function drawTable(t) {
+  const w = TABLE_W
+  const h = HEADER_H + t.fields.length * ROW_H + 6
+  const sel = t.id === selTableId
+
+  ctx.save()
+  // 阴影 + 卡片
+  ctx.shadowColor = 'rgba(0,0,0,.16)'
+  ctx.shadowBlur = 14
+  ctx.shadowOffsetY = 4
+  ctx.fillStyle = getVar('--surface')
+  rr(t.x, t.y, w, h, 12)
+  ctx.fill()
+  ctx.restore()
+
+  // 表头
+  ctx.save()
+  rr(t.x, t.y, w, HEADER_H, 12)
+  ctx.clip()
+  ctx.fillStyle = t.color
+  ctx.fillRect(t.x, t.y, w, HEADER_H)
+  ctx.restore()
+
+  ctx.fillStyle = '#fff'
+  ctx.font = '600 13px -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif'
+  ctx.textBaseline = 'middle'
+  clipped(t.name, t.x + 12, t.y + (t.comment ? 15 : HEADER_H / 2), w - 24)
+  if (t.comment) {
+    ctx.font = '11px -apple-system, "PingFang SC", sans-serif'
+    ctx.globalAlpha = .82
+    clipped(t.comment, t.x + 12, t.y + 30, w - 24)
+    ctx.globalAlpha = 1
+  }
+
+  // 边框
+  ctx.strokeStyle = sel ? t.color : getVar('--border')
+  ctx.lineWidth = sel ? 2 : 1
+  rr(t.x, t.y, w, h, 12)
+  ctx.stroke()
+
+  // 字段行
+  ctx.font = '12px -apple-system, "PingFang SC", sans-serif'
+  t.fields.forEach((f, i) => {
+    const y = t.y + HEADER_H + i * ROW_H
+    if (i % 2 === 1) {
+      ctx.fillStyle = getVar('--surface2')
+      ctx.fillRect(t.x + 1, y, w - 2, ROW_H)
+    }
+    // 左端口
+    ctx.beginPath()
+    ctx.arc(t.x, y + ROW_H / 2, 4, 0, Math.PI * 2)
+    ctx.fillStyle = f.fk ? '#f59e0b' : (f.pk ? '#2563eb' : getVar('--border'))
+    ctx.fill()
+
+    let tx = t.x + 12
+    // 主键 / 外键 标记
+    if (f.pk) { badge('PK', '#2563eb', tx, y + ROW_H / 2); tx += 26 }
+    else if (f.fk) { badge('FK', '#f59e0b', tx, y + ROW_H / 2); tx += 26 }
+
+    ctx.fillStyle = getVar('--text')
+    ctx.textBaseline = 'middle'
+    ctx.font = '500 12px -apple-system, "PingFang SC", sans-serif'
+    clipped(f.name, tx, y + ROW_H / 2, 96)
+
+    // 类型靠右
+    ctx.fillStyle = getVar('--muted')
+    ctx.font = '11px ui-monospace, Consolas, monospace'
+    ctx.textAlign = 'right'
+    let ty = f.type + (f.notnull ? ' *' : '')
+    clippedRight(ty, t.x + w - 12, y + ROW_H / 2, 96)
+    ctx.textAlign = 'left'
+  })
+}
+
+function badge(txt, color, x, cy) {
+  ctx.save()
+  ctx.fillStyle = color
+  ctx.globalAlpha = .14
+  rr(x, cy - 8, 22, 16, 4)
+  ctx.fill()
+  ctx.globalAlpha = 1
+  ctx.fillStyle = color
+  ctx.font = '700 9px ui-monospace, Consolas, monospace'
+  ctx.textAlign = 'center'
+  ctx.fillText(txt, x + 11, cy + .5)
+  ctx.textAlign = 'left'
+  ctx.restore()
+}
+
+function clipped(s, x, cy, maxW) {
+  let str = String(s)
+  if (ctx.measureText(str).width <= maxW) { ctx.fillText(str, x, cy); return }
+  while (str.length > 1 && ctx.measureText(str + '…').width > maxW) str = str.slice(0, -1)
+  ctx.fillText(str + '…', x, cy)
+}
+function clippedRight(s, xr, cy, maxW) {
+  let str = String(s)
+  if (ctx.measureText(str).width <= maxW) { ctx.fillText(str, xr, cy); return }
+  while (str.length > 1 && ctx.measureText('…' + str).width > maxW) str = str.slice(1)
+  ctx.fillText('…' + str, xr, cy)
+}
+
+/* ---------- 关系连线 ---------- */
+function rowCenter(t, i) {
+  const idx = Math.max(0, t.fields.findIndex((f) => f.id === i))
+  return { x: t.x + TABLE_W, y: t.y + HEADER_H + idx * ROW_H + ROW_H / 2 }
+}
+
+function relPath(r) {
+  const a = tableById(r.a), b = tableById(r.b)
+  if (!a || !b) return null
+  const p1 = rowCenter(a, r.aField)
+  const p1L = { x: a.x, y: p1.y }
+  const p2 = rowCenter(b, r.bField)
+  const p2L = { x: b.x, y: p2.y }
+  // 约定：从「一对多」的 1 端（右端口）连到 N 端（左端口）；自连接走右侧绕行
+  const dx = Math.abs(p2L.x - p1.x)
+  const c = Math.max(40, dx * 0.42)
+  return {
+    from: p1, to: p2L,
+    c1: { x: p1.x + c, y: p1.y },
+    c2: { x: p2L.x - c, y: p2L.y },
+    self: a.id === b.id
+  }
+}
+
+function drawRel(r) {
+  const p = relPath(r)
+  if (!p) return
+  const sel = r.id === selRelId
+  const color = sel ? getVar('--primary') : getVar('--muted')
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineWidth = sel ? 2.2 : 1.5
+  ctx.beginPath()
+  if (p.self) {
+    ctx.moveTo(p.from.x, p.from.y)
+    ctx.bezierCurveTo(p.from.x + 70, p.from.y - 60, p.to.x + 70, p.to.y + 60, p.to.x, p.to.y)
+  } else {
+    ctx.moveTo(p.from.x, p.from.y)
+    ctx.bezierCurveTo(p.c1.x, p.c1.y, p.c2.x, p.c2.y, p.to.x, p.to.y)
+  }
+  ctx.stroke()
+
+  // 端点基数标记：1 端画竖杠，N 端画三叉
+  oneMark(p.from.x + 10, p.from.y, color)
+  manyMark(p.to.x - 10, p.to.y, color)
+  ctx.restore()
+}
+
+function oneMark(x, y, color) {
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1.8
+  ctx.beginPath()
+  ctx.moveTo(x - 6, y - 6); ctx.lineTo(x - 6, y + 6)
+  ctx.stroke()
+  ctx.restore()
+}
+function manyMark(x, y, color) {
+  ctx.save()
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1.6
+  ctx.beginPath()
+  ctx.moveTo(x, y); ctx.lineTo(x + 9, y - 7)
+  ctx.moveTo(x, y); ctx.lineTo(x + 9, y)
+  ctx.moveTo(x, y); ctx.lineTo(x + 9, y + 7)
+  ctx.stroke()
+  ctx.restore()
+}
+
+/* ================= 坐标换算 ================= */
+function toScene(clientX, clientY) {
+  const r = cv.getBoundingClientRect()
+  return {
+    x: (clientX - r.left - view.x) / view.zoom,
+    y: (clientY - r.top - view.y) / view.zoom
+  }
+}
+
+function tableRect(t) {
+  return { x: t.x, y: t.y, w: TABLE_W, h: HEADER_H + t.fields.length * ROW_H + 6 }
+}
+
+function hitTable(p) {
+  for (let i = tables.length - 1; i >= 0; i--) {
+    const t = tables[i]
+    const r = tableRect(t)
+    if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) return t
+  }
+  return null
+}
+
+function hitPort(p) {
+  const R = 9 / view.zoom + 3
+  for (let i = tables.length - 1; i >= 0; i--) {
+    const t = tables[i]
+    for (let j = 0; j < t.fields.length; j++) {
+      const cy = t.y + HEADER_H + j * ROW_H + ROW_H / 2
+      // 左端口
+      if (Math.hypot(p.x - t.x, p.y - cy) < R) return { t, f: t.fields[j], side: 'l' }
+      // 右端口
+      if (Math.hypot(p.x - (t.x + TABLE_W), p.y - cy) < R) return { t, f: t.fields[j], side: 'r' }
+    }
+  }
+  return null
+}
+
+function hitRel(p) {
+  const R = 8 / view.zoom + 3
+  for (let i = rels.length - 1; i >= 0; i--) {
+    const path = relPath(rels[i])
+    if (!path) continue
+    // 采样贝塞尔近似曲线长度，做点线距离判断
+    for (let k = 0; k <= 24; k++) {
+      const t = k / 24
+      const x = bez(path.from.x, path.c1.x, path.c2.x, path.to.x, t)
+      const y = bez(path.from.y, path.c1.y, path.c2.y, path.to.y, t)
+      if (Math.hypot(p.x - x, p.y - y) < R) return rels[i]
+    }
+  }
+  return null
+}
+function bez(a, b, c, d, t) {
+  const mt = 1 - t
+  return mt * mt * mt * a + 3 * mt * mt * t * b + 3 * mt * t * t * c + t * t * t * d
+}
+
+/* ================= 交互 ================= */
+let drag = null // {kind:'table'|'pan'|'rel', ...}
+let spaceDown = false
+
+cv.addEventListener('pointerdown', (e) => {
+  if (e.button === 1 || spaceDown) {
+    drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y }
+    cv.classList.add('grabbing')
+    return
+  }
+  const p = toScene(e.clientX, e.clientY)
+
+  const port = hitPort(p)
+  if (port) {
+    drag = { kind: 'rel', from: port, x: p.x, y: p.y }
+    return
+  }
+
+  const t = hitTable(p)
+  if (t) {
+    selTableId = t.id; selRelId = null
+    drag = { kind: 'table', id: t.id, dx: p.x - t.x, dy: p.y - t.y, moved: false }
+    render(); renderSide()
+    return
+  }
+
+  const r = hitRel(p)
+  if (r) {
+    selRelId = r.id; selTableId = null
+    render(); renderSide()
+    return
+  }
+
+  selTableId = null; selRelId = null
+  drag = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y }
+  render(); renderSide()
+})
+
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) {
+    const p = toScene(e.clientX, e.clientY)
+    cv.className = hitPort(p) ? 'cross' : (hitTable(p) ? 'movable' : '')
+    return
+  }
+  if (drag.kind === 'pan') {
+    view.x = drag.vx + (e.clientX - drag.sx)
+    view.y = drag.vy + (e.clientY - drag.sy)
+    render(); scheduleSave()
+    return
+  }
+  if (drag.kind === 'table') {
+    const p = toScene(e.clientX, e.clientY)
+    const t = tableById(drag.id)
+    if (!t) return
+    let nx = p.x - drag.dx
+    let ny = p.y - drag.dy
+    if (!e.altKey) {
+      nx = Math.round(nx / SNAP) * SNAP
+      ny = Math.round(ny / SNAP) * SNAP
+    }
+    t.x = nx; t.y = ny
+    drag.moved = true
+    render(); scheduleSave()
+    return
+  }
+  if (drag.kind === 'rel') {
+    const p = toScene(e.clientX, e.clientY)
+    drag.x = p.x; drag.y = p.y
+    // 临时线：直接画在最上层
+    render()
+    ctx.save()
+    ctx.translate(view.x, view.y)
+    ctx.scale(view.zoom, view.zoom)
+    ctx.strokeStyle = getVar('--primary')
+    ctx.lineWidth = 1.8
+    ctx.setLineDash([6, 5])
+    ctx.beginPath()
+    ctx.moveTo(drag.from.side === 'r' ? drag.from.t.x + TABLE_W : drag.from.t.x, drag.from.y)
+    ctx.lineTo(p.x, p.y)
+    ctx.stroke()
+    ctx.restore()
+  }
+})
+
+window.addEventListener('pointerup', (e) => {
+  if (!drag) return
+  if (drag.kind === 'rel') {
+    const p = toScene(e.clientX, e.clientY)
+    const to = hitPort(p)
+    if (to && !(to.t.id === drag.from.t.id && to.f.id === drag.from.f.id)) {
+      addRel(drag.from, to)
+    }
+  }
+  if (drag.kind === 'table' && drag.moved) pushHistory()
+  cv.classList.remove('grabbing')
+  drag = null
+  render()
+})
+
+cv.addEventListener('wheel', (e) => {
+  e.preventDefault()
+  const r = cv.getBoundingClientRect()
+  const cx = e.clientX - r.left
+  const cy = e.clientY - r.top
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12
+  setZoom(view.zoom * factor, cx, cy)
+}, { passive: false })
+
+function setZoom(nz, cx, cy) {
+  nz = Math.min(2.4, Math.max(0.3, nz))
+  const k = nz / view.zoom
+  view.x = cx - (cx - view.x) * k
+  view.y = cy - (cy - view.y) * k
+  view.zoom = nz
+  render(); scheduleSave()
+}
+
+cv.addEventListener('dblclick', (e) => {
+  const p = toScene(e.clientX, e.clientY)
+  const t = hitTable(p)
+  if (t) {
+    // 双击表头空白处加一个字段，命中行则聚焦检查器
+    const idx = Math.floor((p.y - t.y - HEADER_H) / ROW_H)
+    if (idx >= 0 && idx < t.fields.length) { renderSide(); $('sideBody').querySelector('.fitem input')?.focus(); return }
+    t.fields.push(makeField({ name: 'field_' + (t.fields.length + 1) }))
+    renderSide(); pushHistory(); render(); scheduleSave()
+    return
+  }
+  const r = hitRel(p)
+  if (r) { selRelId = r.id; selTableId = null; render(); renderSide() }
+})
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !isEditing()) { spaceDown = true; e.preventDefault() }
+  const mod = e.ctrlKey || e.metaKey
+  if (mod && e.key.toLowerCase() === 'z') {
+    e.preventDefault()
+    e.shiftKey ? redo() : undo()
+  }
+  if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo() }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && !isEditing()) {
+    if (selRelId) { deleteRel(selRelId); e.preventDefault() }
+    else if (selTableId) { deleteTable(selTableId); e.preventDefault() }
+  }
+})
+window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false })
+function isEditing() {
+  const a = document.activeElement
+  return a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT')
+}
+
+/* ================= 增删改 ================= */
+/* 找一个不与现有表重叠的位置：按网格扫，命中空位就用；都占满则回到起点错开 */
+function freeSpot() {
+  const stepX = TABLE_W + 80
+  const stepY = 260
+  const baseX = Math.round((40 - view.x) / view.zoom / SNAP) * SNAP
+  const baseY = Math.round((40 - view.y) / view.zoom / SNAP) * SNAP
+  const gap = 24
+
+  const overlap = (x, y) => tables.some((t) => {
+    const r = tableRect(t)
+    return !(x + TABLE_W + gap < r.x || x > r.x + r.w + gap || y + 200 + gap < r.y || y > r.y + r.h + gap)
+  })
+
+  for (let row = 0; row < 12; row++) {
+    for (let col = 0; col < 6; col++) {
+      const x = baseX + col * stepX
+      const y = baseY + row * stepY
+      if (!overlap(x, y)) return { x, y }
+    }
+  }
+  return { x: baseX + tables.length * 24, y: baseY + tables.length * 24 }
+}
+
+function addTable(x, y) {
+  let pos = { x, y }
+  if (x == null || y == null) pos = freeSpot()
+  const t = makeTable(pos.x, pos.y)
+  tables.push(t)
+  selTableId = t.id
+  selRelId = null
+  render(); renderSide(); pushHistory(); scheduleSave()
+  return t
+}
+
+function deleteTable(id) {
+  tables = tables.filter((t) => t.id !== id)
+  rels = rels.filter((r) => r.a !== id && r.b !== id)
+  if (selTableId === id) selTableId = null
+  render(); renderSide(); pushHistory(); scheduleSave()
+}
+
+function deleteRel(id) {
+  rels = rels.filter((r) => r.id !== id)
+  if (selRelId === id) selRelId = null
+  render(); renderSide(); pushHistory(); scheduleSave()
+}
+
+function addRel(from, to) {
+  // 约定 from 是 1 端：若 from 在右侧拖动，则 to 为 1 端
+  const one = from.side === 'l' ? to : from
+  const many = from.side === 'l' ? from : to
+  const exists = rels.some((r) => r.aField === one.f.id && r.bField === many.f.id)
+  if (exists) return
+  rels.push({
+    id: newId('r'), a: one.t.id, aField: one.f.id, b: many.t.id, bField: many.f.id,
+    card: '1:N', optional: false, onDelete: 'NO ACTION', onUpdate: 'NO ACTION'
+  })
+  many.f.fk = true
+  selRelId = rels[rels.length - 1].id
+  selTableId = null
+  render(); renderSide(); pushHistory(); scheduleSave()
+}
+
+/* ================= 检查器 ================= */
+function renderSide() {
+  const body = $('sideBody')
+  const t = selTableId ? tableById(selTableId) : null
+  const r = selRelId ? rels.find((x) => x.id === selRelId) : null
+
+  if (t) {
+    $('sideHead').textContent = '表 · ' + t.name
+    body.innerHTML = `
+      <div class="row"><label>表名</label><input type="text" id="tName" value="${esc(t.name)}" /></div>
+      <div class="row"><label>注释</label><input type="text" id="tComment" value="${esc(t.comment)}" placeholder="可选" /></div>
+      <div class="row"><label>颜色</label>
+        <div class="colors">${COLORS.map((c) => `<div class="swatch${c === t.color ? ' on' : ''}" data-c="${c}" style="background:${c}"></div>`).join('')}</div>
+      </div>
+      <div class="fields">
+        <div class="fields-title"><span>字段（${t.fields.length}）</span><div style="flex:1"></div>
+          <button class="btn sq" id="addField">+ 字段</button></div>
+        ${t.fields.map((f, i) => fieldHtml(f, i)).join('')}
+      </div>
+      <div style="margin-top:16px"><button class="btn danger" id="delTable">删除这张表</button></div>
+      <datalist id="typeList">${TYPES.map((x) => `<option value="${x}">`).join('')}</datalist>
+    `
+
+    $('tName').addEventListener('input', (e) => { t.name = e.target.value; render(); scheduleSave() })
+    $('tComment').addEventListener('input', (e) => { t.comment = e.target.value; render(); scheduleSave() })
+    body.querySelectorAll('.swatch').forEach((s) => {
+      s.addEventListener('click', () => {
+        t.color = s.dataset.c
+        renderSide(); render(); pushHistory(); scheduleSave()
+      })
+    })
+    $('addField').addEventListener('click', () => {
+      t.fields.push(makeField({ name: 'field_' + (t.fields.length + 1) }))
+      renderSide(); render(); pushHistory(); scheduleSave()
+    })
+    $('delTable').addEventListener('click', () => deleteTable(t.id))
+
+    t.fields.forEach((f, i) => {
+      const root = body.querySelector(`.fitem[data-fid="${f.id}"]`)
+      if (!root) return
+      root.querySelector('.fname').addEventListener('input', (e) => { f.name = e.target.value; render(); scheduleSave() })
+      root.querySelector('.type').addEventListener('input', (e) => { f.type = e.target.value; render(); scheduleSave() })
+      const fc = root.querySelector('.fcomment')
+      if (fc) fc.addEventListener('input', (e) => { f.comment = e.target.value; scheduleSave() })
+      root.querySelectorAll('.flag').forEach((b) => {
+        b.addEventListener('click', () => {
+          const k = b.dataset.k
+          if (k === 'rm') { t.fields.splice(i, 1); renderSide(); render(); pushHistory(); scheduleSave(); return }
+          if (k === 'up' && i > 0) { [t.fields[i - 1], t.fields[i]] = [t.fields[i], t.fields[i - 1]]; renderSide(); render(); pushHistory(); scheduleSave(); return }
+          if (k === 'dn' && i < t.fields.length - 1) { [t.fields[i + 1], t.fields[i]] = [t.fields[i], t.fields[i + 1]]; renderSide(); render(); pushHistory(); scheduleSave(); return }
+          f[k] = !f[k]
+          renderSide(); render(); pushHistory(); scheduleSave()
+        })
+      })
+    })
+    return
+  }
+
+  if (r) {
+    const a = tableById(r.a), b = tableById(r.b)
+    const fa = a && a.fields.find((f) => f.id === r.aField)
+    const fb = b && b.fields.find((f) => f.id === r.bField)
+    $('sideHead').textContent = '关系'
+    body.innerHTML = `
+      <div class="empty" style="margin-bottom:12px">
+        <b>${esc(a ? a.name : '?')}.${esc(fa ? fa.name : '?')}</b>
+        &nbsp;→&nbsp;
+        <b>${esc(b ? b.name : '?')}.${esc(fb ? fb.name : '?')}</b>
+      </div>
+      <div class="row"><label>基数</label>
+        <select id="rCard">
+          ${['1:1', '1:N', 'N:M'].map((c) => `<option value="${c}"${c === r.card ? ' selected' : ''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="row"><label>可空</label>
+        <select id="rOpt">
+          <option value="0"${!r.optional ? ' selected' : ''}>必填（NOT NULL）</option>
+          <option value="1"${r.optional ? ' selected' : ''}>可空（NULL）</option>
+        </select>
+      </div>
+      <div class="row"><label>ON DELETE</label>
+        <select id="rDel">${FK_ACTIONS.map((x) => `<option${x === r.onDelete ? ' selected' : ''}>${x}</option>`).join('')}</select>
+      </div>
+      <div class="row"><label>ON UPDATE</label>
+        <select id="rUpd">${FK_ACTIONS.map((x) => `<option${x === r.onUpdate ? ' selected' : ''}>${x}</option>`).join('')}</select>
+      </div>
+      <div style="margin-top:16px"><button class="btn danger" id="delRel">删除这条关系</button></div>
+    `
+    $('rCard').addEventListener('change', (e) => { r.card = e.target.value; render(); pushHistory(); scheduleSave() })
+    $('rOpt').addEventListener('change', (e) => { r.optional = e.target.value === '1'; render(); pushHistory(); scheduleSave() })
+    $('rDel').addEventListener('change', (e) => { r.onDelete = e.target.value; scheduleSave() })
+    $('rUpd').addEventListener('change', (e) => { r.onUpdate = e.target.value; scheduleSave() })
+    $('delRel').addEventListener('click', () => deleteRel(r.id))
+    return
+  }
+
+  $('sideHead').textContent = '检查器'
+  body.innerHTML = `
+    <div class="empty">
+      <b>开始：</b><br />
+      · 点「+ 新建表」或选一个模板<br />
+      · 拖表头移动位置，从行端口拖到另一张表的行即可连线<br />
+      · 空白处拖动平移，滚轮缩放<br />
+      · 画完点「SQL」直接得到建表语句
+    </div>`
+}
+
+function fieldHtml(f, i) {
+  return `
+    <div class="fitem" data-fid="${f.id}">
+      <div class="l1">
+        <input type="text" class="fname" value="${esc(f.name)}" placeholder="字段名" />
+        <input type="text" class="type" value="${esc(f.type)}" list="typeList" placeholder="类型" />
+      </div>
+      <div class="l1" style="margin-top:6px">
+        <input type="text" class="fcomment" value="${esc(f.comment)}" placeholder="字段注释（可选，MySQL 会写成 COMMENT）" style="flex:1;min-width:0" />
+      </div>
+      <div class="flags">
+        <button class="flag${f.pk ? ' on' : ''}" data-k="pk">PK</button>
+        <button class="flag fk${f.fk ? ' on' : ''}" data-k="fk">FK</button>
+        <button class="flag${f.notnull ? ' on' : ''}" data-k="notnull">NOT NULL</button>
+        <button class="flag${f.unique ? ' on' : ''}" data-k="unique">UNIQUE</button>
+        <button class="flag" data-k="up" title="上移">↑</button>
+        <button class="flag" data-k="dn" title="下移">↓</button>
+        <button class="flag" data-k="rm" title="删除"><span class="x">✕</span></button>
+      </div>
+    </div>`
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+}
+
+/* ================= SQL 生成 ================= */
+function q(name) {
+  if (dialect === 'mysql') return '`' + name + '`'
+  return '"' + name + '"'
+}
+
+function lit(f) {
+  if (f.def === '' || f.def == null) return ''
+  const v = String(f.def)
+  if (/^(NULL|CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|TRUE|FALSE)$/i.test(v)) return v.toUpperCase()
+  if (/^-?\d+(\.\d+)?$/.test(v)) return v
+  return "'" + v.replace(/'/g, "''") + "'"
+}
+
+function genSQL() {
+  const parts = []
+  // 建表顺序：先被引用的表（拓扑排序），避免外键指向还没建的表
+  const order = topoOrder()
+
+  for (const t of order) {
+    const lines = []
+    const pk = t.fields.filter((f) => f.pk)
+    for (const f of t.fields) {
+      let line = '  ' + q(f.name) + ' ' + f.type
+      if (f.notnull || f.pk) line += ' NOT NULL'
+      if (f.unique && !f.pk) line += ' UNIQUE'
+      const d = lit(f)
+      if (d) line += ' DEFAULT ' + d
+      if (f.comment && dialect === 'mysql') line += " COMMENT '" + f.comment.replace(/'/g, "''") + "'"
+      lines.push(line)
+    }
+    if (pk.length) lines.push('  PRIMARY KEY (' + pk.map((f) => q(f.name)).join(', ') + ')')
+
+    let head = 'CREATE TABLE ' + q(t.name) + ' (\n' + lines.join(',\n') + '\n)'
+    if (dialect === 'mysql') {
+      if (t.comment) head += " COMMENT='" + t.comment.replace(/'/g, "''") + "'"
+      head += ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+    }
+    parts.push(head + ';')
+  }
+
+  // 外键
+  for (const r of rels) {
+    const a = tableById(r.a), b = tableById(r.b)
+    if (!a || !b) continue
+    const fa = a.fields.find((f) => f.id === r.aField)
+    const fb = b.fields.find((f) => f.id === r.bField)
+    if (!fa || !fb) continue
+    const name = 'fk_' + a.name + '_' + fa.name
+    let line = 'ALTER TABLE ' + q(a.name) + ' ADD CONSTRAINT ' + q(name) +
+      ' FOREIGN KEY (' + q(fa.name) + ') REFERENCES ' + q(b.name) + ' (' + q(fb.name) + ')'
+    if (r.onDelete && r.onDelete !== 'NO ACTION') line += ' ON DELETE ' + r.onDelete
+    if (r.onUpdate && r.onUpdate !== 'NO ACTION') line += ' ON UPDATE ' + r.onUpdate
+    parts.push(line + ';')
+  }
+
+  // 索引注释（唯一但非主键的字段已内联 UNIQUE，这里只补注释表说明）
+  const header = '-- 由「数据库 ER 图设计器」生成 · ' + DIALECT_NAME[dialect] + ' · ' + new Date().toLocaleString('zh-CN')
+  return header + '\n\n' + parts.join('\n\n') + '\n'
+}
+
+const DIALECT_NAME = { mysql: 'MySQL', postgresql: 'PostgreSQL', sqlite: 'SQLite' }
+
+/* 拓扑排序：被引用的表先建；有环时退回原顺序 */
+function topoOrder() {
+  const indeg = new Map()
+  const out = new Map()
+  for (const t of tables) { indeg.set(t.id, 0); out.set(t.id, []) }
+  for (const r of rels) {
+    if (r.a === r.b) continue
+    if (!indeg.has(r.a) || !indeg.has(r.b)) continue
+    out.get(r.b).push(r.a)      // b 被 a 引用 → b 先
+    indeg.set(r.a, indeg.get(r.a) + 1)
+  }
+  const q0 = tables.filter((t) => indeg.get(t.id) === 0).map((t) => t.id)
+  const res = []
+  const seen = new Set()
+  while (q0.length) {
+    const id = q0.shift()
+    if (seen.has(id)) continue
+    seen.add(id)
+    res.push(tableById(id))
+    for (const nx of out.get(id) || []) {
+      indeg.set(nx, indeg.get(nx) - 1)
+      if (indeg.get(nx) === 0) q0.push(nx)
+    }
+  }
+  for (const t of tables) if (!seen.has(t.id)) res.push(t)
+  return res.filter(Boolean)
+}
+
+/* ================= SQL 反向解析 ================= */
+function parseSQL(text) {
+  const newTables = []
+  const pendingFk = []
+  const byName = new Map()
+
+  const clean = text
+    .replace(/--[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+
+  const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?[`"[]?([\w$]+)[`"\]]?\s*\(([\s\S]*?)\)\s*(?:ENGINE|COMMENT|DEFAULT|;|$)/gi
+  let m
+  while ((m = re.exec(clean))) {
+    const name = m[1]
+    const body = m[2]
+    const fields = []
+    const pkCols = []
+
+    // 按顶层逗号切分（忽略括号内的逗号）
+    const segs = splitTopLevel(body)
+    for (const seg of segs) {
+      const s = seg.trim()
+      if (!s) continue
+      if (/^PRIMARY\s+KEY/i.test(s)) {
+        const cols = (s.match(/\(([^)]*)\)/) || [, ''])[1]
+        cols.split(',').forEach((c) => pkCols.push(c.replace(/[`"\s]/g, '')))
+        continue
+      }
+      if (/^(UNIQUE|KEY|INDEX|CONSTRAINT|FOREIGN)\b/i.test(s)) {
+        const fk = s.match(/FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+[`"]?([\w$]+)[`"]?\s*\(([^)]*)\)/i)
+        if (fk) pendingFk.push({ from: name, col: fk[1].replace(/[`"\s]/g, ''), to: fk[2], toCol: fk[3].replace(/[`"\s]/g, '') })
+        continue
+      }
+      const fm = s.match(/^[`"]?([\w$]+)[`"]?\s+([A-Za-z]+(?:\s*\([^)]*\))?)/)
+      if (!fm) continue
+      const colName = fm[1]
+      const type = fm[2].toUpperCase().replace(/\s+/g, '')
+      fields.push(makeField({
+        name: colName,
+        type: type,
+        pk: new RegExp('\\b' + colName + '\\b', 'i').test(s) && /\bPRIMARY\s+KEY\b/i.test(s),
+        notnull: /\bNOT\s+NULL\b/i.test(s),
+        unique: /\bUNIQUE\b/i.test(s),
+        fk: /\bREFERENCES\b/i.test(s)
+      }))
+      const inlineFk = s.match(/REFERENCES\s+[`"]?([\w$]+)[`"]?\s*\(([^)]*)\)/i)
+      if (inlineFk) pendingFk.push({ from: name, col: colName, to: inlineFk[1], toCol: inlineFk[2].replace(/[`"\s]/g, '') })
+    }
+
+    for (const c of pkCols) {
+      const f = fields.find((x) => x.name === c)
+      if (f) f.pk = true
+    }
+
+    const t = makeTable(0, 0, { name: name, fields: fields.length ? fields : [makeField({ name: 'id' })] })
+    newTables.push(t)
+    byName.set(name, t)
+  }
+
+  if (!newTables.length) throw new Error('没解析到 CREATE TABLE 语句。支持 MySQL / PostgreSQL / SQLite 的常见写法。')
+
+  // ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY
+  const reAlter = /ALTER\s+TABLE\s+[`"]?([\w$]+)[`"]?\s+ADD\s+(?:CONSTRAINT\s+[`"]?[\w$]+[`"]?\s+)?FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+[`"]?([\w$]+)[`"]?\s*\(([^)]*)\)/gi
+  while ((m = reAlter.exec(clean))) {
+    pendingFk.push({ from: m[1], col: m[2].replace(/[`"\s]/g, ''), to: m[3], toCol: m[4].replace(/[`"\s]/g, '') })
+  }
+
+  // 建关系
+  const newRels = []
+  for (const fk of pendingFk) {
+    const a = byName.get(fk.from)
+    const b = byName.get(fk.to)
+    if (!a || !b) continue
+    const fa = a.fields.find((x) => x.name === fk.col)
+    const fb = b.fields.find((x) => x.name === fk.toCol)
+    if (!fa || !fb) continue
+    fa.fk = true
+    newRels.push({
+      id: newId('r'), a: b.id, aField: fb.id, b: a.id, bField: fa.id,
+      card: '1:N', optional: false, onDelete: 'NO ACTION', onUpdate: 'NO ACTION'
+    })
+  }
+
+  // 自动排布
+  layoutTables(newTables)
+  return { tables: newTables, rels: newRels }
+}
+
+function splitTopLevel(s) {
+  const out = []
+  let depth = 0, cur = ''
+  for (const ch of s) {
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) { out.push(cur); cur = '' } else cur += ch
+  }
+  if (cur.trim()) out.push(cur)
+  return out
+}
+
+/* ================= 布局 ================= */
+function layoutTables(list) {
+  list = list || tables
+  const cols = Math.max(1, Math.ceil(Math.sqrt(list.length)))
+  list.forEach((t, i) => {
+    t.x = 60 + (i % cols) * (TABLE_W + 90)
+    t.y = 60 + Math.floor(i / cols) * 260
+  })
+}
+function autoLayout() {
+  layoutTables(tables)
+  render(); pushHistory(); scheduleSave()
+  toast('已自动排列')
+}
+function fitView() {
+  if (!tables.length) { view = { zoom: 1, x: 40, y: 40 }; render(); return }
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+  for (const t of tables) {
+    const r = tableRect(t)
+    x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y)
+    x2 = Math.max(x2, r.x + r.w); y2 = Math.max(y2, r.y + r.h)
+  }
+  const pad = 60
+  const w = wrap.clientWidth - pad * 2
+  const h = wrap.clientHeight - pad * 2
+  const zoom = Math.min(1.4, Math.max(0.3, Math.min(w / (x2 - x1), h / (y2 - y1))))
+  view.zoom = zoom
+  view.x = pad - x1 * zoom + Math.max(0, (w - (x2 - x1) * zoom) / 2)
+  view.y = pad - y1 * zoom + Math.max(0, (h - (y2 - y1) * zoom) / 2)
+  render(); scheduleSave()
+}
+
+/* ================= 模板 ================= */
+const TEMPLATES = {
+  blog() {
+    const T = (name, comment, color, fields) => makeTable(0, 0, {
+      name, comment, color, fields: fields.map((f) => makeField({ name: f[0], type: f[1], pk: !!f[2], notnull: !!f[2] }))
+    })
+    const users = T('users', '用户', COLORS[0], [['id', 'BIGINT', 1], ['username', 'VARCHAR(64)'], ['email', 'VARCHAR(128)'], ['created_at', 'DATETIME']])
+    const cats = T('categories', '分类', COLORS[2], [['id', 'INT', 1], ['name', 'VARCHAR(64)'], ['slug', 'VARCHAR(64)']])
+    const arts = T('articles', '文章', COLORS[4], [['id', 'BIGINT', 1], ['title', 'VARCHAR(255)'], ['content', 'LONGTEXT'], ['category_id', 'INT'], ['author_id', 'BIGINT'], ['views', 'INT'], ['published_at', 'DATETIME']])
+    const tags = T('tags', '标签', COLORS[6], [['id', 'INT', 1], ['name', 'VARCHAR(32)']])
+    const rel = (a, af, b, bf) => ({ id: newId('r'), a: a.id, aField: af, b: b.id, bField: bf, card: '1:N', optional: false, onDelete: 'NO ACTION', onUpdate: 'NO ACTION' })
+    const rs = [
+      rel(users, users.fields[0].id, arts, arts.fields[4].id),
+      rel(cats, cats.fields[0].id, arts, arts.fields[3].id)
+    ]
+    arts.fields[3].fk = true; arts.fields[4].fk = true
+    return { tables: [users, cats, arts, tags], rels: rs }
+  },
+  shop() {
+    const T = (name, comment, color, fields) => makeTable(0, 0, {
+      name, comment, color, fields: fields.map((f) => makeField({ name: f[0], type: f[1], pk: !!f[2], notnull: !!f[2] }))
+    })
+    const users = T('users', '买家', COLORS[0], [['id', 'BIGINT', 1], ['phone', 'VARCHAR(20)'], ['nickname', 'VARCHAR(64)']])
+    const orders = T('orders', '订单', COLORS[1], [['id', 'BIGINT', 1], ['order_no', 'VARCHAR(32)'], ['user_id', 'BIGINT'], ['total', 'DECIMAL(10,2)'], ['status', 'TINYINT'], ['created_at', 'DATETIME']])
+    const items = T('order_items', '订单明细', COLORS[3], [['id', 'BIGINT', 1], ['order_id', 'BIGINT'], ['product_id', 'BIGINT'], ['qty', 'INT'], ['price', 'DECIMAL(10,2)']])
+    const prods = T('products', '商品', COLORS[2], [['id', 'BIGINT', 1], ['name', 'VARCHAR(255)'], ['price', 'DECIMAL(10,2)'], ['stock', 'INT']])
+    const rel = (a, af, b, bf) => ({ id: newId('r'), a: a.id, aField: af, b: b.id, bField: bf, card: '1:N', optional: false, onDelete: 'CASCADE', onUpdate: 'NO ACTION' })
+    const rs = [
+      rel(users, users.fields[0].id, orders, orders.fields[2].id),
+      rel(orders, orders.fields[0].id, items, items.fields[1].id),
+      rel(prods, prods.fields[0].id, items, items.fields[2].id)
+    ]
+    orders.fields[2].fk = true; items.fields[1].fk = true; items.fields[2].fk = true
+    return { tables: [users, orders, items, prods], rels: rs }
+  },
+  rbac() {
+    const T = (name, comment, color, fields) => makeTable(0, 0, {
+      name, comment, color, fields: fields.map((f) => makeField({ name: f[0], type: f[1], pk: !!f[2], notnull: !!f[2] }))
+    })
+    const users = T('sys_user', '用户', COLORS[0], [['id', 'BIGINT', 1], ['username', 'VARCHAR(64)'], ['password', 'VARCHAR(128)']])
+    const roles = T('sys_role', '角色', COLORS[4], [['id', 'BIGINT', 1], ['code', 'VARCHAR(64)'], ['name', 'VARCHAR(64)']])
+    const perms = T('sys_permission', '权限', COLORS[2], [['id', 'BIGINT', 1], ['code', 'VARCHAR(128)'], ['name', 'VARCHAR(64)']])
+    const ur = T('sys_user_role', '用户-角色', COLORS[3], [['id', 'BIGINT', 1], ['user_id', 'BIGINT'], ['role_id', 'BIGINT']])
+    const rp = T('sys_role_permission', '角色-权限', COLORS[3], [['id', 'BIGINT', 1], ['role_id', 'BIGINT'], ['permission_id', 'BIGINT']])
+    const rel = (a, af, b, bf) => ({ id: newId('r'), a: a.id, aField: af, b: b.id, bField: bf, card: '1:N', optional: false, onDelete: 'CASCADE', onUpdate: 'NO ACTION' })
+    const rs = [
+      rel(users, users.fields[0].id, ur, ur.fields[1].id),
+      rel(roles, roles.fields[0].id, ur, ur.fields[2].id),
+      rel(roles, roles.fields[0].id, rp, rp.fields[1].id),
+      rel(perms, perms.fields[0].id, rp, rp.fields[2].id)
+    ]
+    ur.fields[1].fk = true; ur.fields[2].fk = true
+    rp.fields[1].fk = true; rp.fields[2].fk = true
+    return { tables: [users, roles, perms, ur, rp], rels: rs }
+  }
+}
+
+function loadTemplate(name) {
+  const d = TEMPLATES[name]()
+  tables = d.tables
+  rels = d.rels
+  layoutTables(tables)
+  selTableId = null; selRelId = null
+  render(); renderSide(); pushHistory(); scheduleSave()
+  fitView()
+  toast('已载入模板：' + ({ blog: '博客', shop: '电商订单', rbac: 'RBAC 权限' }[name]))
+}
+
+/* ================= 导入导出 ================= */
+function toast(msg) {
+  const t = $('toast')
+  t.textContent = msg
+  t.hidden = false
+  clearTimeout(t._t)
+  t._t = setTimeout(() => { t.hidden = true }, 1900)
+}
+
+function download(href, name) {
+  const a = document.createElement('a')
+  a.href = href
+  a.download = name
+  a.click()
+}
+
+function exportPng() {
+  if (!tables.length) { toast('画布是空的'); return }
+
+  // 按内容包围盒重新绘制到离屏画布：导出结果与当前缩放/视口无关
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity
+  for (const t of tables) {
+    const r = tableRect(t)
+    x1 = Math.min(x1, r.x); y1 = Math.min(y1, r.y)
+    x2 = Math.max(x2, r.x + r.w); y2 = Math.max(y2, r.y + r.h)
+  }
+  const pad = 48
+  const w = Math.ceil(x2 - x1 + pad * 2)
+  const h = Math.ceil(y2 - y1 + pad * 2)
+  const scale = 2
+
+  const off = document.createElement('canvas')
+  off.width = w * scale
+  off.height = h * scale
+  const g = off.getContext('2d')
+
+  // 临时把全局 ctx 指向离屏画布，复用同一套 draw 函数
+  const mainCtx = ctx
+  const savedView = { zoom: view.zoom, x: view.x, y: view.y }
+  ctx = g
+  view = { zoom: 1, x: 0, y: 0 }
+
+  g.fillStyle = getVar('--surface')
+  g.fillRect(0, 0, off.width, off.height)
+  g.scale(scale, scale)
+  g.translate(-x1 + pad, -y1 + pad)
+
+  for (const r of rels) drawRel(r)
+  for (const t of tables) drawTable(t)
+
+  ctx = mainCtx
+  view = savedView
+
+  off.toBlob((b) => {
+    if (!b) { toast('导出失败'); return }
+    const url = URL.createObjectURL(b)
+    download(url, 'er-diagram.png')
+    setTimeout(() => URL.revokeObjectURL(url), 5000)
+    toast('已导出 PNG（' + off.width + '×' + off.height + '）')
+  }, 'image/png')
+}
+
+function exportJson() {
+  const data = { version: 1, dialect, tables, rels }
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  download(url, 'er-diagram.json')
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+  toast('已导出 JSON')
+}
+
+function applyImport(data) {
+  if (!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error('JSON 里没有 tables 数组')
+  tables = data.tables.map((t) => makeTable(0, 0, {
+    name: t.name, comment: t.comment || '', color: t.color || COLORS[0], x: t.x || 0, y: t.y || 0,
+    fields: (t.fields || []).map((f) => makeField(f))
+  }))
+  rels = (data.rels || []).map((r) => Object.assign({ id: newId('r'), card: '1:N', optional: false, onDelete: 'NO ACTION', onUpdate: 'NO ACTION' }, r, { id: newId('r') }))
+  dialect = data.dialect || 'mysql'
+  selTableId = null; selRelId = null
+  render(); renderSide(); pushHistory(); scheduleSave(); fitView()
+}
+
+/* ================= 事件绑定 ================= */
+$('addTable').addEventListener('click', () => addTable())
+$('tpl').addEventListener('change', (e) => {
+  const v = e.target.value
+  e.target.value = ''
+  if (v) loadTemplate(v)
+})
+$('undo').addEventListener('click', undo)
+$('redo').addEventListener('click', redo)
+$('fit').addEventListener('click', fitView)
+$('auto').addEventListener('click', autoLayout)
+
+$('sqlBtn').addEventListener('click', () => {
+  const d = $('sqlDrawer')
+  d.hidden = !d.hidden
+  if (!d.hidden) refreshSql()
+})
+$('sqlClose').addEventListener('click', () => { $('sqlDrawer').hidden = true })
+
+function refreshSql() {
+  $('sqlOut').value = genSQL()
+  $('sqlErr').hidden = true
+}
+
+document.getElementById('dialects').addEventListener('click', (e) => {
+  const b = e.target.closest('.tab')
+  if (!b) return
+  dialect = b.dataset.d
+  document.querySelectorAll('#dialects .tab').forEach((x) => x.classList.toggle('on', x === b))
+  refreshSql(); scheduleSave()
+})
+
+$('copySql').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('sqlOut').value)
+    toast('SQL 已复制')
+  } catch (e) {
+    $('sqlOut').select()
+    document.execCommand('copy')
+    toast('SQL 已复制')
+  }
+})
+$('dlSql').addEventListener('click', () => {
+  const blob = new Blob([$('sqlOut').value], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  download(url, 'schema-' + dialect + '.sql')
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
+})
+
+$('pngBtn').addEventListener('click', exportPng)
+$('jsonBtn').addEventListener('click', exportJson)
+
+$('impBtn').addEventListener('click', () => {
+  const which = prompt('导入方式：\n1 = 粘贴 SQL（CREATE TABLE）\n2 = 选择 JSON 文件\n\n输入 1 或 2')
+  if (which === '1') {
+    const txt = prompt('把 CREATE TABLE ... 语句粘到这里：')
+    if (!txt) return
+    try {
+      const d = parseSQL(txt)
+      tables = d.tables; rels = d.rels
+      selTableId = null; selRelId = null
+      render(); renderSide(); pushHistory(); scheduleSave(); fitView()
+      toast('已导入 ' + tables.length + ' 张表')
+    } catch (e) {
+      alert('解析失败：' + e.message)
+    }
+  } else if (which === '2') {
+    $('fileJson').click()
+  }
+})
+
+$('fileJson').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0]
+  e.target.value = ''
+  if (!f) return
+  const fr = new FileReader()
+  fr.onload = () => {
+    try { applyImport(JSON.parse(fr.result)); toast('已导入 JSON') }
+    catch (err) { alert('导入失败：' + err.message) }
+  }
+  fr.readAsText(f)
+})
+
+let clearArmed = false
+$('clearBtn').addEventListener('click', () => {
+  if (!clearArmed) {
+    clearArmed = true
+    $('clearBtn').textContent = '再点一次确认'
+    setTimeout(() => { clearArmed = false; $('clearBtn').textContent = '清空' }, 3000)
+    return
+  }
+  clearArmed = false
+  $('clearBtn').textContent = '清空'
+  tables = []; rels = []
+  selTableId = null; selRelId = null
+  render(); renderSide(); pushHistory(); scheduleSave()
+  toast('已清空')
+})
+
+/* ================= 启动 ================= */
+window.addEventListener('resize', render)
+if (loadSaved()) {
+  render(); renderSide(); syncUndo()
+  pushHistory()
+  if (tables.length) { fitView() }
+} else {
+  // 首次打开给一个示例，避免空白画布不知从哪下手
+  loadTemplate('blog')
+  history = []
+  histIdx = -1
+  pushHistory()
+}
+render()
+</script>
+</body>
+</html>
